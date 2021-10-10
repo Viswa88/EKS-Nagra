@@ -1,0 +1,9 @@
+---
+## aws command which update the lambda function to key rotation
+- name: update the lambda function for key secret rotation
+  command: "aws lambda update-function-code --function-name  {{environment_name}}-MySecretsManagerRotationFunction --zip-file fileb://{{playbook_dir}}/roles/lambda/secret_rotation/files/lambda.zip --region {{aws_region}}"
+  environment:
+     AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+     AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+  become: true
+  register: lambda_update_ok_result

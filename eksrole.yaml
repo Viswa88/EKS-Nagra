@@ -1,0 +1,17 @@
+--- 
+gather_facts: false
+hosts: localhost
+tasks: 
+  - 
+    iam_role: 
+      assume_role_policy_document: "Version: '2012-10-17' Statement: - Effect: Allow Principal: Service: - eks.amazonaws.com Action: - sts:AssumeRole ManagedPolicyArns: - arn:aws:iam::aws:policy/AmazonEKSServicePolicy - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy "
+      aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+      aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+      description: "This role was created by Ansible for EKS Cluster"
+      ec2_region: "{{ AWS_REGION }}"
+      name: EKS_IAMRole
+    name: "Create New IAM role"
+    register: iam_role
+  - 
+    debug: 
+      var: iam_role

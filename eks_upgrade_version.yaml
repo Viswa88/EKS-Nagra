@@ -1,0 +1,218 @@
+#####################################################################
+###                Get existing Worker Instances                  ###
+#####################################################################
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Get EKS Worker Instances
+      ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{vpc['region']}}"
+        filters:
+          "instance-state-name": "running"
+          "tag:Name": "{{environment_name}}-kubernetes-eks-node"
+          "tag:environment": "{{environment_name}}"
+      register: ec2_info
+
+    - name: displaying output
+      debug: msg="{{item.instance_id}}"
+      with_items: "{{ec2_info.instances}}"
+
+#####################################################################
+###                       Get Kubernetes Nodes                    ###
+#####################################################################
+
+- hosts: gateways
+  gather_facts: false
+  tasks:
+    - name: "Kubernetes nodes"
+      command: "kubectl get no -o=custom-columns=NAME:.metadata.name --no-headers"
+      register: nodes_info
+
+    - debug: var=nodes_info.stdout_lines
+
+#####################################################################
+###               Update an existing EKS cluster                  ###
+#####################################################################
+- hosts: localhost
+  gather_facts: false
+  tasks:
+   - name: Get eks current version for the cluster
+     shell: "aws eks describe-cluster --region {{vpc.region}} --name {{environment_name}} --query 'cluster.version' --output text"
+     environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+     register: eks_version_result
+
+   - debug:
+      var=eks_version_result.stdout_lines[0]
+
+
+#####################################################################
+###               Upgrade EKS cluster                             ###
+#####################################################################
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Upgrade clusters in loop
+      include_tasks: eks_upgrade_cluster_loop.yaml
+      loop: "{{ eks_versions_list }}"
+
+#####################################################################
+###                Deploy PDB for OPF3 services                   ###
+#####################################################################
+- hosts: gateways
+  gather_facts: false
+  tasks:
+    - name: install PDB for OPF3 services
+      include_role:
+        name: services
+      vars:
+        action: "pdb_install"
+      loop: "{{services | dict2items }}"
+      when: (services_to_deploy is defined and current_service.key in services_to_deploy) or services_to_deploy is not defined
+      loop_control:
+        loop_var: current_service
+      ignore_errors: true
+
+#####################################################################
+###        Create New template with latest version AMI ID         ###
+#####################################################################
+
+- hosts: localhost
+  gather_facts: false
+  connection: local
+  roles:
+    - { role: groundwork/discover }
+    - { role: eks/auto_scaling_group }
+
+#####################################################################
+###             Install Helm EKS supported version                ###
+#####################################################################
+
+- hosts: gateways
+  gather_facts: false
+  roles:
+    - { role: helm }
+
+#####################################################################
+###             Remove Global permission for kubeconig            ###
+#####################################################################
+- hosts: gateways
+  gather_facts: false
+  tasks:
+    - name: "remove global read permission for kube config"
+      file:
+        path: /home/ubuntu/.kube/config
+        mode: "go-r"
+
+#####################################################################
+###                     Gather ASG details                        ###
+#####################################################################
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Gather ASG info in VPC"
+      ec2_asg_info:
+        name: "{{ environment_name }}-kubernetes-eks-node-asg"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{vpc['region']}}"
+        tags:
+          vpc_name: "{{ vpc_name }}"
+      register: asgs
+
+    - name: "Get ASG actual desired count"
+      set_fact:
+        desired_count: "{{ k8s_worker_max_count }}"
+        min_count: "{{ k8s_worker_count }}"
+        max_count: "{{ k8s_worker_max_count }}"
+
+#####################################################################
+###                       Increase ASG                            ###
+#####################################################################
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Increase ASG desired capacity"
+      set_fact:
+        desired_count_updated: "{{ desired_count|int * 2|int }}"
+        max_count_updated: "{{ max_count|int * 2|int }}"
+
+    - name: start ASG instances
+      ec2_asg:
+         aws_access_key: "{{ aws_access_key }}"
+         aws_secret_key: "{{ aws_secret_key }}"
+         region: "{{vpc['region']}}"
+         name: "{{ environment_name }}-kubernetes-eks-node-asg"
+         min_size: "{{ min_count }}"
+         max_size: "{{ max_count_updated }}"
+         desired_capacity: "{{ desired_count_updated }}"
+
+    - name: Wait 120 seconds for new instances to become reachable/usable
+      wait_for:
+        timeout: 120
+#####################################################################
+###                      Drain Kubernetes nodes                   ###
+#####################################################################
+
+- hosts: gateways
+  gather_facts: false
+  tasks:
+   - name: Kubernetes drain nodes
+     command: "kubectl drain {{ item }} --ignore-daemonsets --grace-period=60 --delete-local-data"
+     loop: "{{ nodes_info.stdout_lines }}"
+
+#####################################################################
+###                  Terminate old ec2-instances                  ###
+#####################################################################
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+     - name: Terminate old version eks instances
+       ec2:
+         aws_access_key: "{{ aws_access_key }}"
+         aws_secret_key: "{{ aws_secret_key }}"
+         region: "{{vpc['region']}}"
+         state: 'absent'
+         instance_ids: "{{item.instance_id}}"
+       with_items: "{{ec2_info.instances}}"
+
+#####################################################################
+###                       Decrease ASG value                      ###
+#####################################################################
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Normalize asg desired count
+      ec2_asg:
+         aws_access_key: "{{ aws_access_key }}"
+         aws_secret_key: "{{ aws_secret_key }}"
+         region: "{{vpc['region']}}"
+         name: "{{ environment_name }}-kubernetes-eks-node-asg"
+         min_size: "{{ k8s_worker_count }}"
+         max_size: "{{ k8s_worker_count }}"
+         desired_capacity: "{{ asg_info['results'][0]['desired_capacity'] | default(k8s_worker_count,true) }}"
+
+#####################################################################
+###                Delete PDB from services                       ###
+#####################################################################
+
+- hosts: gateways
+  gather_facts: false
+  tasks:
+    - name: Remove PDB for OPF3 services
+      include_role:
+        name: services
+      vars:
+        action: "pdb_remove"
+      loop: "{{services | dict2items }}"
+      when: (services_to_deploy is defined and current_service.key in services_to_deploy) or services_to_deploy is not defined
+      loop_control:
+        loop_var: current_service
+      ignore_errors: True

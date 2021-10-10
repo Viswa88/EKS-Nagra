@@ -1,0 +1,36 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: "kibana-ingress"
+  namespace: "kube-system"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: {{certificate_arn}}
+    alb.ingress.kubernetes.io/tags: {{ingress_tags}}
+    alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=300
+    alb.ingress.kubernetes.io/auth-type: oidc
+{% if backup_environment_name is defined and backup_environment_name %}
+    alb.ingress.kubernetes.io/auth-idp-oidc: '{"Issuer": "{{DR_Issuer}}","AuthorizationEndpoint": "{{DR_AuthorizationEndpoint}}","TokenEndpoint": "{{DR_TokenEndpoint}}","UserInfoEndpoint": "{{DR_UserInfoEndpoint}}","SecretName": "{{SecretName}}"}'
+{% else %}
+    alb.ingress.kubernetes.io/auth-idp-oidc: '{"Issuer": "{{Issuer}}","AuthorizationEndpoint": "{{AuthorizationEndpoint}}","TokenEndpoint": "{{TokenEndpoint}}","UserInfoEndpoint": "{{UserInfoEndpoint}}","SecretName": "{{SecretName}}"}'
+{% endif %}
+spec:
+  rules:
+    - host: kibana.{{environment_name}}.{{dns_domain}}
+      http:
+        paths:
+          - path: /*
+            backend:
+              serviceName: "kibana-logging"
+              servicePort: 5601
+{% if backup_environment_name is defined and backup_environment_name %}
+    - host: kibana.{{backup_environment_name}}.{{dns_domain}}
+      http:
+        paths:
+          - path: /*
+            backend:
+              serviceName: "kibana-logging"
+              servicePort: 5601
+{% endif %}

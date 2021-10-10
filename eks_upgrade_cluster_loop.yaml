@@ -1,0 +1,23 @@
+---
+- name: "Upgrade to {{ item }} EKS cluster version"
+  command: "aws eks update-cluster-version --region {{ vpc['region'] }} --name {{environment_name}} --kubernetes-version {{item}}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+  delay: 600
+  register: eks_result
+  when: eks_version_result.stdout_lines[0] | int < item
+  ignore_errors: true
+
+- name: "Wait 120 seconds for {{ item }} EKS Cluster to be in upgraded state"
+  wait_for:
+   timeout: 120
+
+- name: "Wait for {{ item }} EKS cluster active status"
+  command: "aws eks wait cluster-active --region {{ vpc['region'] }} --name {{environment_name}}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+  register: cluster_active
+  retries: 20
+  until: cluster_active is success

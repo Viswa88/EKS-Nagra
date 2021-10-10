@@ -1,0 +1,95 @@
+---
+#####################################################################
+###                   Delete Tiller resources                     ###
+#####################################################################
+- hosts: gateways
+  gather_facts: false
+  tasks:
+   - name: Kubernetes delete tiller and psp
+     shell: "{{ item }}"
+     loop:
+      - kubectl delete deployment tiller-deploy --namespace kube-system
+      - kubectl delete -f /etc/kubernetes/tiller-rbac.yaml --namespace kube-system
+      - kubectl delete psp prometheus-blackbox-exporter-psp --namespace kube-system
+      - kubectl delete psp prometheus-blackbox-exporter-psp --namespace "{{ops_namespace}}"
+     ignore_errors: true
+   - name: Helm2 delete resources
+     shell: "helm delete {{ item }} --namespace={{ops_namespace}}"
+     loop:
+      - prometheus-blackbox-exporter
+      - prometheus
+      - grafana
+     ignore_errors: true
+   - name: kubectl delete deployemts of monitoring
+     shell: "kubectl delete deployments {{ item }} --namespace={{ops_namespace}}"
+     loop:
+      - prometheus-blackbox-exporter
+      - prometheus-kube-state-metrics
+      - prometheus-pushgateway
+      - grafana
+      - prometheus
+     ignore_errors: true
+   - name: kubectl delete configmap resource from sre
+     shell: "kubectl delete configmap prometheus-blackbox-exporter prometheus-alertmanager grafana-test grafana prometheus-server --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete role from sre
+     shell: "kubectl delete role grafana grafana-test prometheus-blackbox-exporter  prometheus-server --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete roleBinding  from sre
+     shell: "kubectl delete roleBinding grafana grafana-test prometheus-blackbox-exporter prometheus-server --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete clusterrole from sre
+     shell: "kubectl delete clusterrole prometheus-alertmanager prometheus-kube-state-metrics  prometheus-pushgateway prometheus-server --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete service resource for monitoring
+     shell: "kubectl delete service {{ item }} --namespace={{ops_namespace}}"
+     loop:
+       - prometheus-server-headless
+       - prometheus-server
+       - prometheus-blackbox-exporter
+       - prometheus-alertmanager-headless
+       - prometheus-kube-state-metrics
+       - prometheus-alertmanager
+       - prometheus-node-exporter
+       - prometheus-pushgateway
+       - grafana
+     ignore_errors: true
+   - name: kubectl delete daemonset resource for monitoring
+     shell: "kubectl delete daemonset prometheus-node-exporter --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete PodSecurityPolicy resource for monitoring
+     shell: "kubectl delete PodSecurityPolicy grafana grafana-test"
+     ignore_errors: true
+   - name: kubectl delete secret resource for monitoring
+     shell: "kubectl delete secret grafana --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete StatefulSet resource for monitoring
+     shell: "kubectl delete StatefulSet prometheus-alertmanager  prometheus-server --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete clusterrole  resource for monitoring
+     shell: "kubectl delete clusterrole  grafana-clusterrole"
+     ignore_errors: true
+   - name: kubectl delete pvc for grafana
+     shell: "kubectl delete pvc grafana --namespace={{ops_namespace}}"
+     ignore_errors: true
+   - name: kubectl delete clusterRoleBinding for moniotring resources
+     shell: "kubectl delete clusterroleBinding {{ item }} --namespace={{ops_namespace}}"
+     loop:
+        - tiller
+        - prometheus-server
+        - prometheus-pushgateway
+        - prometheus-kube-state-metrics
+        - prometheus-alertmanager
+        - grafana-clusterrolebinding
+     ignore_errors: true
+   - name: kubectl delete serviceaccount for moniotring resources
+     shell: "kubectl delete serviceaccount {{ item }} --namespace={{ops_namespace}}"
+     loop:
+        - grafana
+        - grafana-test
+        - prometheus-server
+        - prometheus-pushgateway
+        - prometheus-kube-state-metrics
+        - prometheus-alertmanager
+        - prometheus-blackbox-exporter
+     ignore_errors: true

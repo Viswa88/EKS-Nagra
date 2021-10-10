@@ -1,0 +1,19 @@
+---
+elasticsearch_cpu_limit: 0m
+elasticsearch_mem_limit: 0M
+elasticsearch_cpu_requests: 0m
+elasticsearch_mem_requests: 0M
+elasticsearch_service_port: 9200
+
+
+# from kubespray/group_vars/all.yml
+bin_dir: /usr/local/bin
+# from kubespray/group_vars/k8s-cluster.yml:
+kube_config_dir: /etc/kubernetes
+
+rbac_enabled: True
+
+elasticsearch_image: "nagra/elasticsearch-logging-oss"
+elasticsearch_image_tag: "{{ elasticsearch_image_tag_version | default('6.2.4.58', true) }}"
+# the repo on the gateway
+elasticsearch_image_repo: "{{deployment_registry_port}}/{{elasticsearch_image}}"

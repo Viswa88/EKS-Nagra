@@ -1,0 +1,9 @@
+---
+apiVersion: storage.k8s.io/v1beta1
+kind: StorageClass
+metadata:
+  name: elasticsearch-logging-storage
+provisioner: kubernetes.io/aws-ebs
+reclaimPolicy: Retain
+parameters:
+  type: gp2

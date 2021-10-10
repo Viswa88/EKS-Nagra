@@ -1,0 +1,112 @@
+---
+- name: "Kibana | Write logtrail config file"
+  become: true
+  template:
+    src: "kibana-logtrail-configmap.yaml.j2"
+    dest: "{{ kube_config_dir }}/kibana-logtrail-configmap.yaml"
+
+- name: "Kibana | Create lograil config map"
+  kube:
+    filename: "{{kube_config_dir}}/kibana-logtrail-configmap.yaml"
+    kubectl: "{{bin_dir}}/kubectl"
+
+- name: "Kibana | Write Kibana deployment"
+  become: true
+  template:
+    src: kibana-deployment.yml.j2
+    dest: "{{ kube_config_dir }}/kibana-deployment.yaml"
+
+- name: "Kibana | Create Kibana deployment"
+  kube:
+    filename: "{{kube_config_dir}}/kibana-deployment.yaml"
+    kubectl: "{{bin_dir}}/kubectl"
+    name: "kibana-logging"
+    namespace: "kube-system"
+    resource: "deployment"
+    state: "latest"
+  run_once: true
+
+- name: "Kibana | Write Kibana service "
+  become: true
+  template:
+    src: kibana-service.yml.j2
+    dest: "{{ kube_config_dir }}/kibana-service.yaml"
+
+- name: "Kibana | Create Kibana service"
+  kube:
+    filename: "{{kube_config_dir}}/kibana-service.yaml"
+    kubectl: "{{bin_dir}}/kubectl"
+    name: "kibana-logging"
+    namespace: "kube-system"
+    resource: "svc"
+    state: "latest"
+  run_once: true
+
+- name: Get TLS certificates facts
+  delegate_to: 127.0.0.1
+  aws_acm_info:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{ vpc['region'] }}"
+    domain_name: "*.{{environment_name}}.{{dns_domain}}"
+  register: certs_facts    
+  when: backup_environment_name is defined and not backup_environment_name
+
+- name: Get TLS certificates facts for DR
+  delegate_to: 127.0.0.1
+  aws_acm_info:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{ vpc['region'] }}"
+    domain_name: "*.{{dns_domain}}"
+  register: certs_dr_facts
+  when: backup_environment_name is defined and backup_environment_name
+
+- name: Search for an existing certificate
+  set_fact:
+    certificate_arn: "{{ certs_facts | json_query(my_query) }}"
+  vars:
+    my_query: "certificates[].certificate_arn | [0]"
+  when: backup_environment_name is defined and not backup_environment_name
+
+- name: Search for an existing DR certificate
+  set_fact:
+    certificate_arn: "{{ certs_dr_facts | json_query(my_query) }}"
+  vars:
+    my_query: "certificates[?contains(subject_alternative_names, '*.{{backup_environment_name}}.{{dns_domain}}')].certificate_arn | [0]"
+  when: backup_environment_name is defined and backup_environment_name
+
+- name: Build tags string
+  set_fact:
+    ingress_tags: "{{ingress_tags}},{{item.key}}={{item.value}}"
+  loop: "{{ domain_custom_tags['kubernetes'] | default({}) | combine(global_tags) | dict2items }}"  
+  vars:
+    ingress_tags: "vpc_name={{vpc_name}},environment={{environment_name}}"
+
+- name: "Kibana oidc secret creation "
+  become: true
+  template:
+    src: kibanaoidc-secret.yaml.j2
+    dest: "{{ kube_config_dir }}/kibanaoidc-secret.yaml"
+
+- name: "Kibana | Creating kibanaoidc-secret"
+  kube:
+    filename: "{{kube_config_dir}}/kibanaoidc-secret.yaml"
+    kubectl: "{{bin_dir}}/kubectl"
+  run_once: true
+
+- name: "Kibana | Write Kibana ingress "
+  become: true
+  template:
+    src: kibana-ingress.yml.j2
+    dest: "{{ kube_config_dir }}/kibana-ingress.yaml"
+
+- name: "Kibana | Create Kibana ingress"
+  kube:
+    filename: "{{kube_config_dir}}/kibana-ingress.yaml"
+    kubectl: "{{bin_dir}}/kubectl"
+    name: "kibana-logging"
+    namespace: "kube-system"
+    resource: "svc"
+    state: "latest"
+  run_once: true  

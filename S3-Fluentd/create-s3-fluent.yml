@@ -1,0 +1,129 @@
+---
+################### Create the S3 bucket for the Image Handling Service ####################
+- name: "List all S3 buckets"
+  aws_s3_bucket_facts:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{vpc['region']}}"
+
+# if there is already a image storage created with old format of bucket name, store the name
+- name: "save information of the fluent bucket name (old format), if it exists"
+  set_fact:
+    present_old_format_images_bucket_name: "{{item.name}}"
+  when: item.name | regex_search(fluentd_bucket_env_prefix + '(\d{14})')
+  with_items: "{{buckets}}"
+
+- name: Is there a previously created new format images bucket?
+  set_fact:
+    present_new_format_images_bucket_name: "{{item.name}}"
+  when: item.name == fluentd_bucket_name
+  with_items: "{{buckets}}"
+
+- name: "Prepare tags"
+  set_fact:
+    additional_s3_tags:
+      type: "s3_images"
+      env: "{{environment_name}}"
+      s3_bucket_name: "{{fluentd_bucket_name}}"
+
+- name: "Combine global_tags and additional_s3_tags"
+  set_fact:
+    s3_final_tags: "{{ global_tags | combine(additional_s3_tags)}}"
+
+- name: create bucket where images will be stored when it is not already created
+  s3_bucket:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{vpc['region']}}"
+    name: "{{fluentd_bucket_name}}"
+    state: present
+    tags: "{{s3_final_tags}}"
+  when: present_new_format_fluentd_bucket_name is undefined
+
+- name: Clone the old bucket into the new
+  command: "aws s3 sync --region {{vpc['region']}} s3://{{present_old_format_fluentd_bucket_name}} s3://{{fluentd_bucket_name}}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"      
+  when: present_old_format_fluentd_bucket_name is defined
+  register: result
+  retries: "{{ retry_count }}"
+  until: result is success
+  delay: "{{ retry_stagger | random + 3 }}"
+
+################### Create the Cloudfront distribution ####################
+
+- name: "Find all cloudfront distributions"
+  cloudfront_facts:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{vpc['region']}}"
+    summary: true
+  register: result
+  retries: "{{ retry_count }}"
+  until: result is success
+  delay: "{{ retry_stagger | random + 3 }}"    
+
+- name: "Check if there is any existing cloudfront distribution the current S3 bucket"
+  set_fact:
+    images_cloudfront_distribution_id: "{{item['Id']}}"
+  with_items: "{{ansible_facts['cloudfront']['summary']['distributions']}}"
+  when: 
+    - item['Tags'] is defined
+    - item['Tags']['s3_bucket_name'] is defined
+    - item['Tags']['s3_bucket_name'] == fluentd_bucket_name
+
+- name: "Create a Cloudfront distribution for the current bucket"
+  cloudfront_distribution:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{vpc['region']}}"
+    state: present
+    default_origin_domain_name: "{{fluentd_bucket_name + '.s3.amazonaws.com'}}"
+    comment: "Fluentd Handling Service Cloudfront Distribution"
+    origins:
+        - id: "{{fluentd_bucket_name}}"
+          domain_name: "{{fluentd_bucket_name + '.s3.amazonaws.com'}}"
+          origin_path: ""
+          s3_origin_access_identity_enabled: true
+    tags: "{{s3_final_tags}}"
+  when: (fluentd_cloudfront_distribution_id is undefined) or (fluentd_cloudfront_distribution_id is none)
+
+- name: "Find all cloudfront distributions"
+  cloudfront_facts:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    region: "{{vpc['region']}}"
+    all_lists: true
+  register: result
+  retries: "{{ retry_count }}"
+  until: result is success
+  delay: "{{ retry_stagger | random + 3 }}"     
+
+- name: "Find the cloudfront distribution ID for the current S3 bucket"
+  set_fact:
+    images_cloudfront_distribution_id: "{{item['Id']}}"
+  with_items: "{{ansible_facts['cloudfront']['summary']['distributions']}}"
+  when: 
+    - item['Tags'] is defined
+    - item['Tags']['s3_bucket_name'] is defined
+    - item['Tags']['s3_bucket_name'] == fluentd_bucket_name
+
+- name: "Find origin access identity"
+  set_fact:
+    images_origin_access_identity_id: "{{ansible_facts['cloudfront']['distributions'][images_cloudfront_distribution_id]['Origins']['Items'][0]['S3OriginConfig']['OriginAccessIdentity'].split('/')[2]}}"
+
+################### Adding policies ####################    
+- name: "Update S3 policy"
+  s3_bucket:
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
+    name: "{{fluentd_bucket_name}}"
+    region: "{{vpc['region']}}"
+    policy: "{{ lookup('template','fluentd_bucket_policy.json.j2') }}"
+  register: result
+  # retrying as S3 bucket may not be immediately ready
+  retries: 60
+  delay: 3
+  until: result is success
+

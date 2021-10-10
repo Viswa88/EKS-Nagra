@@ -1,0 +1,37 @@
+---
+kibana_cpu_limit: 100m
+kibana_mem_limit: 0M
+kibana_cpu_requests: 100m
+kibana_mem_requests: 0M
+kibana_service_port: 5601
+kibana_base_url: ""
+
+# from kubespray/group_vars/all.yml
+bin_dir: /usr/local/bin
+# from kubespray/group_vars/k8s-cluster.yml:
+kube_config_dir: /etc/kubernetes
+
+rbac_enabled: True
+
+kibana_image: "nagra/kibana-logtrail-oss"
+kibana_image_tag: "1.0.0.29"
+kibana_source_registry: "module"
+# the repo on the gateway
+kibana_image_repo: "{{deployment_registry_port}}/{{kibana_image}}"
+elasticsearch_service_port: 9200
+
+# we get below configuarion by doing Microsoft identity platform and OpenID Connect and SecretName can obtain by above credentials
+Issuer: "https://operator.{{environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin"
+AuthorizationEndpoint: "https://operator.{{environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin/protocol/openid-connect/auth"
+TokenEndpoint: "https://operator.{{environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin/protocol/openid-connect/token"
+UserInfoEndpoint: "https://operator.{{environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin/protocol/openid-connect/userinfo"
+SecretName: "kibanaoidc"
+
+#Set variable name for DR
+backup_environment_name:
+
+# we get below configuarion by doing Microsoft identity platform and OpenID Connect and SecretName can obtain by above credentials for DR domain
+DR_Issuer: "https://operator.{{backup_environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin"
+DR_AuthorizationEndpoint: "https://operator.{{backup_environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin/protocol/openid-connect/auth"
+DR_TokenEndpoint: "https://operator.{{backup_environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin/protocol/openid-connect/token"
+DR_UserInfoEndpoint: "https://operator.{{backup_environment_name}}.{{dns_domain}}/keycloak/auth/realms/nagra_admin/protocol/openid-connect/userinfo"

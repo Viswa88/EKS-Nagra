@@ -1,0 +1,7 @@
+---
+- hosts: gateways 
+  gather_facts: False
+  tasks:
+    - name: "Delete workers PVC volumes to create volume with EBS Encryption enabled"
+      include_role:
+        name: ami_migration/eks_workers_pvc_delete 

@@ -1,0 +1,18 @@
+---
+fluentd_cpu_limit: 0m
+fluentd_mem_limit: 500Mi
+fluentd_cpu_requests: 100m
+fluentd_mem_requests: 200Mi
+fluentd_config_dir: /etc/fluent/config.d
+
+# from kubespray/group_vars/all.yml
+bin_dir: /usr/local/bin
+# from kubespray/group_vars/k8s-cluster.yml:
+kube_config_dir: /etc/kubernetes
+docker_daemon_graph: "/var/lib/docker"
+
+rbac_enabled: True
+
+fluentd_version: "v2.0.4"
+fluentd_image_repo: "403199068824.dkr.ecr.eu-west-1.amazonaws.com/nagra/fluentd-elasticsearch-s3"
+fluentd_image_tag: "{{ fluentd_version }}"

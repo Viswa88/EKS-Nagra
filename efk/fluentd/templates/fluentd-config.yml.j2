@@ -1,0 +1,158 @@
+---
+# https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.10/cluster/addons/fluentd-elasticsearch/fluentd-es-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: "kube-system"
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+data:
+  system.conf: |-
+    <system>
+      root_dir /tmp/fluentd-buffers/
+    </system>
+
+  containers.input.conf: |-
+    <source>
+      @id fluentd-containers.log
+      @type tail
+      path /var/log/containers/*.log
+      pos_file /var/log/es-containers.log.pos
+      time_format %Y-%m-%dT%H:%M:%S.%NZ
+      tag raw.kubernetes.*
+      read_from_head true
+      <parse>
+        @type multi_format
+        <pattern>
+          format json
+          time_key time
+          time_format %Y-%m-%dT%H:%M:%S.%NZ
+        </pattern>
+      </parse>
+    </source>
+    # Detect exceptions in the log output and forward them as one log entry.
+    <match raw.kubernetes.**>
+      @id raw.kubernetes
+      @type detect_exceptions
+      remove_tag_prefix raw
+      message log
+      stream stream
+      multiline_flush_interval 5
+      max_bytes 500000
+      max_lines 1000
+    </match>
+  forward.input.conf: |-
+    # Takes the messages sent over TCP
+    <source>
+      @type forward
+    </source>
+
+  output.conf: |-
+
+    <match kubernetes.**>
+      @type copy
+      <store>
+        @type relabel
+        @label @s3
+      </store>
+      <store>
+        @type relabel
+        @label @es
+      </store>
+    </match>
+
+
+    <label @s3>
+     <filter kubernetes.**>
+       @type grep
+       <exclude>
+         key log
+         pattern "/ping"
+       </exclude>
+     </filter>
+     <filter kubernetes.**>
+       @type grep
+       <exclude>
+         key log
+         pattern "Metric client health check"
+       </exclude>
+     </filter>
+
+     <match kubernetes.**>
+        @type s3
+        @id out_s3
+        s3_bucket {{fluentd_bucket_name}}
+        s3_region {{aws_region}}
+        path year=%Y/month=%m/day=%d/${tag[4]}/
+        time_slice_format %Y%m%d%H%M
+        s3_object_key_format %{path}%{index}.%{file_extension}
+
+        <buffer tag,time>
+          @type file
+          path /var/log/fluent/s3
+          #flush_mode interval
+          timekey 600  #it will store every 10mins
+          timekey_wait 5m
+          timekey_use_utc true
+          chunk_limit_size 256MB
+          #total_limit_size 512MB
+          retry_forever
+          retry_max_interval 30
+          overflow_action drop_oldest_chunk    
+        </buffer>
+        format json
+     </match>
+    </label>
+
+    <label @es>
+      <filter kubernetes.**>
+         @type kubernetes_metadata
+      </filter>
+      <filter **>
+        @type grep
+        <exclude>
+          key log
+          pattern "/ping"
+        </exclude>
+      </filter>
+      <filter **>
+       @type grep
+        <exclude>
+          key log
+          pattern "Metric client health check"
+        </exclude>
+      </filter>
+
+      <filter **>
+        @type grep
+        <exclude>
+          key log
+          pattern DEBUG \[*
+        </exclude>
+      </filter>
+      <match **>
+        @type copy
+        <store>
+          @id elasticsearch
+          @type elasticsearch
+          include_tag_key true
+          host elasticsearch-logging
+          port 9200
+          logstash_format true
+          <buffer>
+            @type file
+            path /var/log/fluentd-buffers/kubernetes.system.buffer
+            flush_mode interval
+            retry_type exponential_backoff
+            flush_thread_count 2
+            flush_interval 5s
+            retry_forever
+            retry_max_interval 30
+            chunk_limit_size 2M
+            queue_limit_length 8
+            overflow_action block
+          </buffer>
+        </store>
+      </match>
+    </label>

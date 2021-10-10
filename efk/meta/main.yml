@@ -1,0 +1,5 @@
+---
+dependencies:
+  - role: kubernetes/configure/efk/elasticsearch
+  - role: kubernetes/configure/efk/fluentd
+  - role: kubernetes/configure/efk/kibana

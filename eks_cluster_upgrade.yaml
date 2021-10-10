@@ -1,0 +1,79 @@
+#####################################################################
+###               Update an existing EKS cluster                  ###
+#####################################################################
+- hosts: localhost
+  gather_facts: false
+  tasks:
+   - name: Get eks current version for the cluster
+     shell: "aws eks describe-cluster --region {{vpc.region}} --name {{environment_name}} --query 'cluster.version' --output text"
+     environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+     register: eks_version_result
+
+   - debug:
+      var=eks_version_result.stdout_lines[0]
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Upgrade an EKS cluster version
+      command: "aws eks update-cluster-version --region {{ vpc['region'] }} --name {{environment_name}} --kubernetes-version {{eks_version}}"
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+      delay: 600
+      register: eks_result
+      when: eks_version_result.stdout_lines[0] | int < eks_version
+      ignore_errors: true
+
+#####################################################################
+###                Deploy PDB for OPF3 services                   ###
+#####################################################################
+- hosts: gateways
+  gather_facts: false
+  tasks:
+    - name: install PDB for OPF3 services
+      include_role:
+        name: services
+      vars:
+        action: "pdb_install"
+      loop: "{{services | dict2items }}"
+      when: (services_to_deploy is defined and current_service.key in services_to_deploy) or services_to_deploy is not defined
+      loop_control:
+        loop_var: current_service
+
+#####################################################################
+###                       Cluster status                          ###
+#####################################################################
+- hosts: localhost
+  gather_facts: false
+  tasks:
+   - name: EKS wait cluster active status
+     command: "aws eks wait cluster-active --region {{ vpc['region'] }} --name {{environment_name}}"
+     environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+     register: cluster_active
+     retries: 10
+     until: cluster_active is success
+
+#####################################################################
+###             Install Helm EKS supported version                ###
+#####################################################################
+
+- hosts: gateways
+  gather_facts: false
+  roles:
+    - { role: helm }
+
+#####################################################################
+###             Remove Global permission for kubeconig            ###
+#####################################################################
+- hosts: gateways
+  gather_facts: false
+  tasks:
+   - name: "remove global read permission for kube config"
+     file: 
+       path: /home/ubuntu/.kube/config
+       mode: "go-r"

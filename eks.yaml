@@ -1,0 +1,19 @@
+---
+- hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Add localhost to the current platform group
+      add_host:
+        hostname: "localhost"
+        groups: "{{platform}}"
+        ##add_host resets this variable for an unknow reason, that's why we make sure to keep the default value
+        ansible_python_interpreter: "{{ansible_python_interpreter}}"
+
+- hosts: localhost
+  gather_facts: False
+  connection: local
+  roles:
+    - { role: groundwork/discover }
+    - { role: eks/cluster }
+    - { role: eks/auto_scaling_group }
